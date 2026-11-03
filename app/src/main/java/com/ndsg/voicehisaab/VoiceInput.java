@@ -2,7 +2,11 @@ package com.ndsg.voicehisaab;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ComponentName;
 import android.content.DialogInterface;
+import android.content.pm.ResolveInfo;
+import android.os.Build;
+import android.speech.RecognitionService;
 import android.content.Intent;
 import android.os.Bundle;
 import android.speech.RecognitionListener;
@@ -38,15 +42,43 @@ public final class VoiceInput implements RecognitionListener {
     private TextView live;
     private ProgressBar level;
     private boolean finished = false;
+    private final List<Object> engines = new ArrayList<>(); // "default", ComponentName, or "ondevice"
+    private int engine = 0;
+    private String engineName = "";
 
     public VoiceInput(Activity a, String lang, Callback cb) {
         this.a = a;
         this.lang = lang;
         this.cb = cb;
+        engines.addAll(engines(a));
+    }
+
+    /** Every speech engine on the phone: system default, installed recognition services (Google first), on-device. */
+    public static List<Object> engines(Activity a) {
+        List<Object> list = new ArrayList<>();
+        if (SpeechRecognizer.isRecognitionAvailable(a)) list.add("default");
+        try {
+            List<ResolveInfo> svcs = a.getPackageManager().queryIntentServices(
+                    new Intent(RecognitionService.SERVICE_INTERFACE), 0);
+            List<ComponentName> google = new ArrayList<>(), other = new ArrayList<>();
+            for (ResolveInfo ri : svcs) {
+                if (ri.serviceInfo == null) continue;
+                ComponentName cn = new ComponentName(ri.serviceInfo.packageName, ri.serviceInfo.name);
+                if (ri.serviceInfo.packageName.startsWith("com.google")) google.add(cn); else other.add(cn);
+            }
+            list.addAll(google);
+            list.addAll(other);
+        } catch (RuntimeException ignored) { }
+        if (Build.VERSION.SDK_INT >= 31) {
+            try {
+                if (SpeechRecognizer.isOnDeviceRecognitionAvailable(a)) list.add("ondevice");
+            } catch (RuntimeException ignored) { }
+        }
+        return list;
     }
 
     public static boolean available(Activity a) {
-        return SpeechRecognizer.isRecognitionAvailable(a);
+        return !engines(a).isEmpty();
     }
 
     public void start() {
@@ -58,7 +90,17 @@ public final class VoiceInput implements RecognitionListener {
         destroyRecognizer();
         finished = false;
         try {
-            sr = SpeechRecognizer.createSpeechRecognizer(a);
+            Object e = engines.get(engine);
+            if (e instanceof ComponentName) {
+                sr = SpeechRecognizer.createSpeechRecognizer(a, (ComponentName) e);
+                engineName = ((ComponentName) e).getPackageName();
+            } else if ("ondevice".equals(e) && Build.VERSION.SDK_INT >= 31) {
+                sr = SpeechRecognizer.createOnDeviceSpeechRecognizer(a);
+                engineName = "on-device";
+            } else {
+                sr = SpeechRecognizer.createSpeechRecognizer(a);
+                engineName = "default";
+            }
             sr.setRecognitionListener(this);
             Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
@@ -70,8 +112,8 @@ public final class VoiceInput implements RecognitionListener {
             i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L);
             sr.startListening(i);
             if (live != null) live.setText("Listening… (" + ("en-IN".equals(lang) ? "English" : "Hindi + English") + ")");
-        } catch (RuntimeException e) {
-            fail("Voice input could not start on this phone.", true);
+        } catch (RuntimeException ex) {
+            if (!nextEngine()) fail("Voice input could not start on this phone.", true);
         }
     }
 
@@ -135,6 +177,24 @@ public final class VoiceInput implements RecognitionListener {
         cb.onFailed(msg, serviceProblem);
     }
 
+    /** Try the next engine; after all engines fail in Hindi, start over in English (India). */
+    private boolean nextEngine() {
+        if (finished) return true;
+        if (engine + 1 < engines.size()) {
+            engine++;
+            listen();
+            return true;
+        }
+        if (!triedFallbackLang && !"en-IN".equals(lang)) {
+            triedFallbackLang = true;
+            lang = "en-IN";
+            engine = 0;
+            listen();
+            return true;
+        }
+        return false;
+    }
+
     // ---------------- RecognitionListener ----------------
     @Override public void onReadyForSpeech(Bundle params) { if (live != null) live.setText("Listening… speak now"); }
     @Override public void onBeginningOfSpeech() { }
@@ -173,13 +233,10 @@ public final class VoiceInput implements RecognitionListener {
             case SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE:
             case SpeechRecognizer.ERROR_SERVER:
             case SpeechRecognizer.ERROR_SERVER_DISCONNECTED:
-                if (!triedFallbackLang && !"en-IN".equals(lang)) {
-                    triedFallbackLang = true;
-                    lang = "en-IN";
-                    listen();
-                    return;
-                }
-                fail("Speech service is not available for this language on your phone.", true);
+            case SpeechRecognizer.ERROR_CLIENT:
+            case SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT:
+                if (nextEngine()) return;
+                fail("Speech service is not working on this phone (code " + error + ").", true);
                 return;
             case SpeechRecognizer.ERROR_NO_MATCH:
             case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
@@ -196,6 +253,7 @@ public final class VoiceInput implements RecognitionListener {
                 fail("Voice service is busy. Please try again in a moment.", false);
                 return;
             default:
+                if (nextEngine()) return;
                 fail("Voice input failed (code " + error + ").", true);
         }
     }

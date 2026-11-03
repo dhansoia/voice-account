@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
         prefs = new Prefs(this);
         if (state != null && state.getString("month") != null) month = YearMonth.parse(state.getString("month"));
         setContentView(buildUi());
+        if (getActionBar() != null) getActionBar().setSubtitle("v" + version());
         refresh();
         handleIntent(getIntent(), state == null);
         if (!prefs.helpShown() && state == null) {
@@ -259,7 +260,15 @@ public class MainActivity extends Activity {
             return;
         }
         if (!VoiceInput.available(this)) {
-            startGoogleDialog();
+            new AlertDialog.Builder(this)
+                    .setTitle("No speech service")
+                    .setMessage("This phone has no speech-to-text service enabled for apps.\n\n"
+                            + "Fix: install/update \"Speech Recognition & Synthesis from Google\" and the \"Google\" app "
+                            + "from Play Store, and allow the Google app the Microphone permission.\n\n"
+                            + "Meanwhile you can type, or dictate with your keyboard's mic.")
+                    .setPositiveButton("Type instead", (d, w) -> typeSentence())
+                    .setNeutralButton("Google voice", (d, w) -> startGoogleDialog())
+                    .setNegativeButton("Cancel", null).show();
             return;
         }
         new VoiceInput(this, prefs.language(), new VoiceInput.Callback() {
@@ -344,7 +353,10 @@ public class MainActivity extends Activity {
         super.onActivityResult(req, res, data);
         if (req != REQ_VOICE) return;
         if (res != RESULT_OK || data == null) {
-            if (res != RESULT_CANCELED) typeSentence();
+            new AlertDialog.Builder(this)
+                    .setMessage("Google voice didn't return any text.")
+                    .setPositiveButton("Type instead", (d, w) -> typeSentence())
+                    .setNegativeButton("Cancel", null).show();
             return;
         }
         ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
@@ -485,7 +497,15 @@ public class MainActivity extends Activity {
                 + "•  Say cash, UPI, PhonePe, card or bank for the payment mode.\n"
                 + "•  You can always correct the entry before saving. Tap any entry later to edit; long-press to delete.\n"
                 + "•  Excel Report (top right) exports month, financial-year or custom-period reports.";
-        new AlertDialog.Builder(this).setTitle("How to speak").setMessage(msg).setPositiveButton("Got it", null).show();
+        new AlertDialog.Builder(this).setTitle("How to speak  ·  v" + version()).setMessage(msg).setPositiveButton("Got it", null).show();
+    }
+
+    private String version() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
     }
 
     // ------------------------------------------------------------------ list adapter
