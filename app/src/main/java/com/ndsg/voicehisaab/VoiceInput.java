@@ -36,21 +36,30 @@ public final class VoiceInput implements RecognitionListener {
     private final Activity a;
     private final Callback cb;
     private String lang;
-    private boolean triedFallbackLang = false;
     private SpeechRecognizer sr;
     private AlertDialog dialog;
     private TextView live;
     private ProgressBar level;
     private boolean finished = false;
     private final List<Object> engines = new ArrayList<>(); // "default", ComponentName, or "ondevice"
-    private int engine = 0;
+    /** Attempts in order: every engine with the chosen language, then English (India), then the phone's own language. */
+    private final List<Object[]> attempts = new ArrayList<>();
+    private int attempt = 0;
     private String engineName = "";
+    private Intent lastIntent;
+    private boolean downloadRequested = false;
+    private final StringBuilder log = new StringBuilder();
 
     public VoiceInput(Activity a, String lang, Callback cb) {
         this.a = a;
         this.lang = lang;
         this.cb = cb;
         engines.addAll(engines(a));
+        List<String> langs = new ArrayList<>();
+        langs.add(lang);
+        if (!"en-IN".equals(lang)) langs.add("en-IN");
+        langs.add(null); // no language extra → engine/phone default
+        for (String l : langs) for (Object e : engines) attempts.add(new Object[]{e, l});
     }
 
     /** Every speech engine on the phone: system default, installed recognition services (Google first), on-device. */
@@ -90,7 +99,8 @@ public final class VoiceInput implements RecognitionListener {
         destroyRecognizer();
         finished = false;
         try {
-            Object e = engines.get(engine);
+            Object e = attempts.get(attempt)[0];
+            lang = (String) attempts.get(attempt)[1];
             if (e instanceof ComponentName) {
                 sr = SpeechRecognizer.createSpeechRecognizer(a, (ComponentName) e);
                 engineName = ((ComponentName) e).getPackageName();
@@ -104,16 +114,21 @@ public final class VoiceInput implements RecognitionListener {
             sr.setRecognitionListener(this);
             Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
-            i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, lang);
+            if (lang != null) {
+                i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang);
+                i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, lang);
+            }
             i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
             i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
             i.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, a.getPackageName());
             i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500L);
+            lastIntent = i;
             sr.startListening(i);
-            if (live != null) live.setText("Listening… (" + ("en-IN".equals(lang) ? "English" : "Hindi + English") + ")");
+            if (live != null) live.setText("Starting… (" + (lang == null ? "phone language" : "en-IN".equals(lang)
+                    ? "English" : "Hindi + English") + ")");
         } catch (RuntimeException ex) {
-            if (!nextEngine()) fail("Voice input could not start on this phone.", true);
+            note("x");
+            if (!nextEngine()) fail(failMessage(), true);
         }
     }
 
@@ -177,18 +192,11 @@ public final class VoiceInput implements RecognitionListener {
         cb.onFailed(msg, serviceProblem);
     }
 
-    /** Try the next engine; after all engines fail in Hindi, start over in English (India). */
+    /** Move to the next engine / language attempt. */
     private boolean nextEngine() {
         if (finished) return true;
-        if (engine + 1 < engines.size()) {
-            engine++;
-            listen();
-            return true;
-        }
-        if (!triedFallbackLang && !"en-IN".equals(lang)) {
-            triedFallbackLang = true;
-            lang = "en-IN";
-            engine = 0;
+        if (attempt + 1 < attempts.size()) {
+            attempt++;
             listen();
             return true;
         }
@@ -229,15 +237,6 @@ public final class VoiceInput implements RecognitionListener {
     public void onError(int error) {
         if (finished) return;
         switch (error) {
-            case SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED:
-            case SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE:
-            case SpeechRecognizer.ERROR_SERVER:
-            case SpeechRecognizer.ERROR_SERVER_DISCONNECTED:
-            case SpeechRecognizer.ERROR_CLIENT:
-            case SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT:
-                if (nextEngine()) return;
-                fail("Speech service is not working on this phone (code " + error + ").", true);
-                return;
             case SpeechRecognizer.ERROR_NO_MATCH:
             case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
                 fail("Didn't catch that. Tap the mic and speak again.", false);
@@ -249,12 +248,32 @@ public final class VoiceInput implements RecognitionListener {
             case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
                 fail("Microphone permission is needed for voice entry.", false);
                 return;
-            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
-                fail("Voice service is busy. Please try again in a moment.", false);
-                return;
             default:
+                note(Integer.toString(error));
+                if (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE && !downloadRequested
+                        && Build.VERSION.SDK_INT >= 33 && sr != null && lastIntent != null) {
+                    downloadRequested = true;
+                    try { sr.triggerModelDownload(lastIntent); } catch (RuntimeException ignored) { }
+                }
                 if (nextEngine()) return;
-                fail("Voice input failed (code " + error + ").", true);
+                fail(failMessage(), true);
         }
     }
+
+    private void note(String code) {
+        if (log.length() > 0) log.append(", ");
+        log.append(engineName).append('/').append(lang == null ? "auto" : lang).append('=').append(code);
+    }
+
+    private String failMessage() {
+        StringBuilder m = new StringBuilder("None of the speech engines on this phone accepted the request.");
+        if (downloadRequested) {
+            m.append("\n\nA speech language download has been requested — connect to Wi-Fi, wait a few minutes, then try again.");
+        }
+        m.append("\n\nTo fix: Google app › Settings › Voice › Offline speech recognition → download Hindi and English (India). "
+                + "Also allow the Google app the Microphone permission.");
+        m.append("\n\nDetails: ").append(log);
+        return m.toString();
+    }
+
 }
