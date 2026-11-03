@@ -38,7 +38,7 @@ public class MainActivity extends Activity {
     public static final String ACTION_VOICE = "com.ndsg.voicehisaab.VOICE";
     public static final String ACTION_REPORT = "com.ndsg.voicehisaab.REPORT";
     private static final int REQ_VOICE = 41;
-    private static final int M_REPORT = 1, M_ADD = 2, M_SETTINGS = 3, M_HELP = 4;
+    private static final int M_REPORT = 1, M_ADD = 2, M_SETTINGS = 3, M_HELP = 4, M_TYPE = 5;
     private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.ENGLISH);
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy", Locale.ENGLISH);
 
@@ -250,33 +250,112 @@ public class MainActivity extends Activity {
     }
 
     // ------------------------------------------------------------------ voice
+    private static final int REQ_MIC = 42;
+
+    /** Main mic button: in-app recogniser → Google dialog → type-in, in that order of fallback. */
     private void startVoice() {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+            return;
+        }
+        if (!VoiceInput.available(this)) {
+            startGoogleDialog();
+            return;
+        }
+        new VoiceInput(this, prefs.language(), new VoiceInput.Callback() {
+            @Override public void onHeard(List<String> results) { handleHeard(results); }
+
+            @Override public void onFailed(String message, boolean serviceProblem) {
+                AlertDialog.Builder b = new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Voice")
+                        .setMessage(message)
+                        .setPositiveButton("Try again", (d, w) -> startVoice())
+                        .setNeutralButton("Type instead", (d, w) -> typeSentence());
+                if (serviceProblem) b.setNegativeButton("Google voice", (d, w) -> startGoogleDialog());
+                else b.setNegativeButton("Cancel", null);
+                b.show();
+            }
+        }).start();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int req, String[] perms, int[] grants) {
+        super.onRequestPermissionsResult(req, perms, grants);
+        if (req != REQ_MIC) return;
+        if (grants.length > 0 && grants[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            startVoice();
+        } else {
+            new AlertDialog.Builder(this)
+                    .setTitle("Microphone permission")
+                    .setMessage("Voice entry needs the microphone. Allow it in Settings › Apps › Voice Hisaab › Permissions, "
+                            + "or type your entry instead.")
+                    .setPositiveButton("Type instead", (d, w) -> typeSentence())
+                    .setNeutralButton("Open settings", (d, w) -> {
+                        Intent i = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                android.net.Uri.fromParts("package", getPackageName(), null));
+                        startActivity(i);
+                    })
+                    .setNegativeButton("Cancel", null).show();
+        }
+    }
+
+    /** Fallback: Google's own voice pop-up. */
+    private void startGoogleDialog() {
         Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, prefs.language());
-        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, prefs.language());
         i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
         i.putExtra(RecognizerIntent.EXTRA_PROMPT, "Boliye… e.g. “Petrol 500 UPI se”");
         try {
             startActivityForResult(i, REQ_VOICE);
         } catch (ActivityNotFoundException e) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Voice input not available")
-                    .setMessage("Install or enable the Google app (speech services) from the Play Store, then try again. "
-                            + "You can still add entries with the + button.")
-                    .setPositiveButton("OK", null).show();
+            typeSentence();
         }
+    }
+
+    /** Last resort that always works: type (or dictate with the keyboard's mic) a sentence. */
+    private void typeSentence() {
+        int p = Ui.dp(this, 20);
+        LinearLayout box = Ui.vbox(this);
+        box.setPadding(p, Ui.dp(this, 8), p, 0);
+        android.widget.EditText et = new android.widget.EditText(this);
+        et.setHint("e.g. Petrol 500 UPI se");
+        et.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        box.addView(et);
+        TextView tip = Ui.text(this, "Tip: tap the mic on your keyboard to dictate.", 13, Ui.MUTED, false);
+        tip.setPadding(0, Ui.dp(this, 6), 0, 0);
+        box.addView(tip);
+        AlertDialog d = new AlertDialog.Builder(this)
+                .setTitle("Type an entry")
+                .setView(box)
+                .setPositiveButton("OK", (x, w) -> {
+                    String s = et.getText().toString().trim();
+                    if (!s.isEmpty()) handleHeard(java.util.Collections.singletonList(s));
+                })
+                .setNegativeButton("Cancel", null)
+                .create();
+        d.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        d.show();
+        et.requestFocus();
     }
 
     @Override
     protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
-        if (req != REQ_VOICE || res != RESULT_OK || data == null) return;
+        if (req != REQ_VOICE) return;
+        if (res != RESULT_OK || data == null) {
+            if (res != RESULT_CANCELED) typeSentence();
+            return;
+        }
         ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
         if (results == null || results.isEmpty()) {
             Toast.makeText(this, "Didn't catch that. Please try again.", Toast.LENGTH_SHORT).show();
             return;
         }
+        handleHeard(results);
+    }
+
+    private void handleHeard(List<String> results) {
         LocalDate today = LocalDate.now();
         String heard = results.get(0);
         VoiceParser.Result r = VoiceParser.parse(heard, today);
@@ -324,7 +403,8 @@ public class MainActivity extends Activity {
         menu.add(0, M_REPORT, 0, "Excel Report").setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS | MenuItem.SHOW_AS_ACTION_WITH_TEXT);
         menu.add(0, M_ADD, 1, "Add manually").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         menu.add(0, M_SETTINGS, 2, "Settings").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
-        menu.add(0, M_HELP, 3, "How to speak").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        menu.add(0, M_TYPE, 3, "Type an entry").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        menu.add(0, M_HELP, 4, "How to speak").setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         return true;
     }
 
@@ -335,6 +415,7 @@ public class MainActivity extends Activity {
             case M_ADD: addManual(); return true;
             case M_SETTINGS: showSettings(); return true;
             case M_HELP: showHelp(); return true;
+            case M_TYPE: typeSentence(); return true;
         }
         return super.onOptionsItemSelected(item);
     }

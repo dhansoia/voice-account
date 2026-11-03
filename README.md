@@ -3,7 +3,7 @@
 Speak an entry in Hindi, English or Hinglish → it is booked with amount, income/expense, category, payment mode and date. Export Excel reports any time.
 
 - Android 10 or newer · works offline · data stays on the phone · no ads, no login, no permissions
-- Voice uses the phone's Google speech service (Hindi + English by default)
+- Voice uses the phone's speech service inside the app (Hindi + English by default; falls back to English, then to Google's voice pop-up, then to typing)
 
 ## 1. Get the APK
 
