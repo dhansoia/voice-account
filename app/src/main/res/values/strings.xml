@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voice Hisaab</string>
+    <string name="sc_voice_short">Speak entry</string>
+    <string name="sc_voice_long">Add income / expense by voice</string>
+    <string name="sc_report_short">Excel report</string>
+    <string name="sc_report_long">Export Excel report</string>
+</resources>

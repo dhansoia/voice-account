@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="voice"
+        android:shortcutLongLabel="@string/sc_voice_long"
+        android:shortcutShortLabel="@string/sc_voice_short">
+        <intent
+            android:action="com.ndsg.voicehisaab.VOICE"
+            android:targetClass="com.ndsg.voicehisaab.MainActivity"
+            android:targetPackage="com.ndsg.voicehisaab" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutId="report"
+        android:shortcutLongLabel="@string/sc_report_long"
+        android:shortcutShortLabel="@string/sc_report_short">
+        <intent
+            android:action="com.ndsg.voicehisaab.REPORT"
+            android:targetClass="com.ndsg.voicehisaab.MainActivity"
+            android:targetPackage="com.ndsg.voicehisaab" />
+    </shortcut>
+</shortcuts>

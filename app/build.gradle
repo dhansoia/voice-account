@@ -1,0 +1,29 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.ndsg.voicehisaab'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.ndsg.voicehisaab'
+        minSdk 29          // Android 10 and above
+        targetSdk 34
+        versionCode 1
+        versionName '1.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        encoding 'UTF-8'
+    }
+}
+// No third-party libraries: speech uses Android's built-in recogniser, Excel files are written by XlsxWriter.java.
