@@ -31,6 +31,9 @@ public final class VoiceInput implements RecognitionListener {
 
         /** Recognition failed; {@code message} is user-friendly. */
         void onFailed(String message, boolean serviceProblem);
+
+        /** The speech service app (e.g. Google) has no microphone permission. */
+        void onServiceNeedsMic(String pkg);
     }
 
     private final Activity a;
@@ -49,6 +52,7 @@ public final class VoiceInput implements RecognitionListener {
     private Intent lastIntent;
     private boolean downloadRequested = false;
     private final StringBuilder log = new StringBuilder();
+    private String servicePackage;
 
     public VoiceInput(Activity a, String lang, Callback cb) {
         this.a = a;
@@ -246,7 +250,14 @@ public final class VoiceInput implements RecognitionListener {
                 fail("Voice needs an internet connection. Please check data / Wi-Fi.", false);
                 return;
             case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
-                fail("Microphone permission is needed for voice entry.", false);
+                // Our app already holds RECORD_AUDIO, so this comes from the speech service (usually the Google app).
+                note("9");
+                if (servicePackage == null) servicePackage = engineName.contains(".") ? engineName : "com.google.android.googlequicksearchbox";
+                if (nextEngine()) return;
+                if (!finished) {
+                    closeDialog();
+                    cb.onServiceNeedsMic(servicePackage);
+                }
                 return;
             default:
                 note(Integer.toString(error));

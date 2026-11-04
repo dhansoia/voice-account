@@ -274,6 +274,27 @@ public class MainActivity extends Activity {
         new VoiceInput(this, prefs.language(), new VoiceInput.Callback() {
             @Override public void onHeard(List<String> results) { handleHeard(results); }
 
+            @Override public void onServiceNeedsMic(String pkg) {
+                String app = "com.google.android.googlequicksearchbox".equals(pkg) || pkg.startsWith("com.google")
+                        ? "Google" : pkg;
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Allow microphone for the " + app + " app")
+                        .setMessage("Speech-to-text on this phone is done by the " + app + " app, and its microphone "
+                                + "permission is turned off.\n\n"
+                                + "Tap “Open settings” › Permissions › Microphone › Allow only while using the app. "
+                                + "Then come back and tap the mic again.")
+                        .setPositiveButton("Open settings", (d, w) -> {
+                            try {
+                                startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                        android.net.Uri.fromParts("package", pkg, null)));
+                            } catch (RuntimeException e) {
+                                startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));
+                            }
+                        })
+                        .setNeutralButton("Type instead", (d, w) -> typeSentence())
+                        .setNegativeButton("Cancel", null).show();
+            }
+
             @Override public void onFailed(String message, boolean serviceProblem) {
                 AlertDialog.Builder b = new AlertDialog.Builder(MainActivity.this)
                         .setTitle("Voice")

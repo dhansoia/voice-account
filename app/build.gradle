@@ -10,8 +10,8 @@ android {
         applicationId 'com.ndsg.voicehisaab'
         minSdk 29          // Android 10 and above
         targetSdk 34
-        versionCode 4
-        versionName '1.3'
+        versionCode 5
+        versionName '1.4'
     }
 
     buildTypes {
